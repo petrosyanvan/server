@@ -7,8 +7,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <termios.h>
+#include <pty.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/poll.h>
 
-#define BUFSIZE 1024
+#define BUFSIZE 		1024
+
+void pty_scriptfoo(int master);
 
 int main(int argc, char **argv) {
   int parentfd; /* parent socket */
@@ -18,10 +25,9 @@ int main(int argc, char **argv) {
   struct sockaddr_in serveraddr; /* server's addr */
   struct sockaddr_in clientaddr; /* client addr */
   struct hostent *hostp; /* client host info */
-  char buf[BUFSIZE]; /* message buffer */
   char *hostaddrp; /* dotted decimal host addr string */
   int optval; /* flag value for setsockopt */
-  int n; /* message byte size */
+  int pty;
 
   /*
    * check command line arguments
@@ -80,7 +86,6 @@ int main(int argc, char **argv) {
    */
   clientlen = sizeof(clientaddr);
   while (1) {
-
     /*
      * accept: wait for a connection request
      */
@@ -93,8 +98,7 @@ int main(int argc, char **argv) {
     /*
      * gethostbyaddr: determine who sent the message
      */
-    hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
-			  sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+    hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, sizeof(clientaddr.sin_addr.s_addr), AF_INET);
     if (hostp == NULL){
       perror("ERROR on gethostbyaddr");
       exit(EXIT_FAILURE);
@@ -104,29 +108,87 @@ int main(int argc, char **argv) {
       perror("ERROR on inet_ntoa\n");
       exit(EXIT_FAILURE);
     }
-    printf("server established connection with %s (%s)\n",
-	   hostp->h_name, hostaddrp);
-
-    /*
-     * read: read input string from the client
-     */
-    bzero(buf, BUFSIZE);
-    n = read(childfd, buf, BUFSIZE);
-    if (n < 0){
-      perror("ERROR reading from socket");
-      exit(EXIT_FAILURE);
+    printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
+    pid_t pid = forkpty(&pty, NULL, NULL, NULL);
+    if(pid == -1){
+    	perror("Couldn't fork\n");
+    	exit(EXIT_FAILURE);
     }
-    printf("server received %d bytes: %s", n, buf);
-
-    /*
-     * write: echo the input string back to the client
-     */
-    n = write(childfd, buf, strlen(buf));
-    if (n < 0){
-      perror("ERROR writing to socket");
-      exit(EXIT_FAILURE);
+    else if (pid == 0){ // if child, exec process
+    	close(childfd);
+    	exit(execlp("/bin/bash", "/bin/bash", NULL));
     }
+    //pty_scriptfoo(pty);
+    char c;
+    fd_set descriptor_set;
 
-    close(childfd);
+    while(1){
+	  FD_ZERO (&descriptor_set);
+	  FD_SET (childfd, &descriptor_set);
+	  FD_SET (pty, &descriptor_set);
+
+	  if (select (FD_SETSIZE, &descriptor_set, NULL, NULL, NULL) < 0) {
+		  perror ("select()");
+		  exit (EXIT_FAILURE);
+	  }
+
+	  if (FD_ISSET (childfd, &descriptor_set)) {
+		  if ( (read (childfd, &c, 1) != 1) || (write (pty, &c, 1) != 1) ) {
+			  fprintf (stderr, "Disconnected\n");
+			  exit (EXIT_FAILURE);
+		  }
+	  }
+
+	  if (FD_ISSET (pty, &descriptor_set)) {
+		  if ((read (pty, &c, 1) != 1) || (write (childfd, &c, 1) != 1)) {
+			  fprintf (stderr, "Disconnected\n");
+			  exit (EXIT_FAILURE);
+		  }
+	  }
+    }
   }
+  return EXIT_SUCCESS;
+}
+
+void pty_scriptfoo(int master)
+{
+	int i, done=0;
+	char buf[BUFSIZE];
+	struct pollfd ufds[3];
+	struct termios ot, t;
+	tcgetattr(STDIN_FILENO, &ot);
+	t = ot;
+	t.c_lflag &= ~( ICANON | ISIG | ECHO | ECHOCTL | ECHOE | ECHOKE | ECHONL | ECHOPRT );
+	t.c_iflag |= IGNBRK;
+	tcsetattr(STDIN_FILENO, TCSANOW, &t);
+	ufds[0].fd = master;
+	ufds[0].events = POLLIN;
+	ufds[1].fd = STDIN_FILENO;
+	ufds[1].events = POLLIN;
+
+	while(!done) {
+		int r = poll(ufds, 2, -1);
+		if((r < 0) && (errno != EINTR))	{
+			done =1;
+			break;
+		}
+		if((ufds[0].revents | ufds[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) {
+			done = 1;
+			break;
+		}
+		if(ufds[0].revents & POLLIN) {
+			i = read(master, buf, BUFSIZE);
+			if(i >=1)
+				write(STDOUT_FILENO, buf, i);
+			else
+				done = 1;
+		}
+		if(ufds[1].revents & POLLIN) {
+			i = read(STDIN_FILENO, buf, BUFSIZE);
+			if(i >= 1)
+				write(master, buf, i);
+			else
+				done =1;
+		}
+	}
 }
