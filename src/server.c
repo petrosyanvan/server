@@ -1,3 +1,13 @@
+/*
+ ============================================================================
+ Name        : server.c
+ Author      : Van Petrosyan
+ Version     :
+ Copyright   : Your copyright notice
+ Description : server in C, Ansi-style
+ ============================================================================
+ */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -57,7 +67,7 @@ int main(int argc, char **argv) {
   /*
    * build the server's Internet address
    */
-  bzero((char *) &serveraddr, sizeof(serveraddr));
+  memset((char *) &serveraddr, 0, sizeof(serveraddr));
   /* this is an Internet address */
   serveraddr.sin_family = AF_INET;
   /* let the system figure out our IP address */
@@ -84,45 +94,44 @@ int main(int argc, char **argv) {
    * main loop: wait for a connection request, echo input line,
    * then close connection.
    */
-  clientlen = sizeof(clientaddr);
-  while (1) {
-    /*
-     * accept: wait for a connection request
-     */
-    childfd = accept(parentfd, (struct sockaddr *) &clientaddr, &clientlen);
-    if (childfd < 0){
-      perror("ERROR on accept");
-      exit(EXIT_FAILURE);
-    }
+clientlen = sizeof(clientaddr);
+  /*
+   * accept: wait for a connection request
+   */
+  childfd = accept(parentfd, (struct sockaddr *) &clientaddr, &clientlen);
+  if (childfd < 0){
+    perror("ERROR on accept");
+    exit(EXIT_FAILURE);
+  }
 
-    /*
-     * gethostbyaddr: determine who sent the message
-     */
-    hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-    if (hostp == NULL){
-      perror("ERROR on gethostbyaddr");
-      exit(EXIT_FAILURE);
-    }
-    hostaddrp = inet_ntoa(clientaddr.sin_addr);
-    if (hostaddrp == NULL){
-      perror("ERROR on inet_ntoa\n");
-      exit(EXIT_FAILURE);
-    }
-    printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
-    pid_t pid = forkpty(&pty, NULL, NULL, NULL);
-    if(pid == -1){
-    	perror("Couldn't fork\n");
-    	exit(EXIT_FAILURE);
-    }
-    else if (pid == 0){ // if child, exec process
-    	close(childfd);
-    	exit(execlp("/bin/bash", "/bin/bash", NULL));
-    }
-    //pty_scriptfoo(pty);
-    char c;
-    fd_set descriptor_set;
+  /*
+   * gethostbyaddr: determine who sent the message
+   */
+  hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+  if (hostp == NULL){
+    perror("ERROR on gethostbyaddr");
+    exit(EXIT_FAILURE);
+  }
+  hostaddrp = inet_ntoa(clientaddr.sin_addr);
+  if (hostaddrp == NULL){
+    perror("ERROR on inet_ntoa\n");
+    exit(EXIT_FAILURE);
+  }
+  printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
+  pid_t pid = forkpty(&pty, NULL, NULL, NULL);
+  if(pid == -1){
+    perror("Couldn't fork\n");
+    exit(EXIT_FAILURE);
+  }
+  else if (pid == 0){ // if child, exec process
+  	close(childfd);
+  	exit(execlp("/bin/bash", "/bin/bash", NULL));
+  }
+  //pty_scriptfoo(pty);
+  char c;
+  fd_set descriptor_set;
 
-    while(1){
+  while(1){
 	  FD_ZERO (&descriptor_set);
 	  FD_SET (childfd, &descriptor_set);
 	  FD_SET (pty, &descriptor_set);
@@ -145,50 +154,6 @@ int main(int argc, char **argv) {
 			  exit (EXIT_FAILURE);
 		  }
 	  }
-    }
   }
   return EXIT_SUCCESS;
-}
-
-void pty_scriptfoo(int master)
-{
-	int i, done=0;
-	char buf[BUFSIZE];
-	struct pollfd ufds[3];
-	struct termios ot, t;
-	tcgetattr(STDIN_FILENO, &ot);
-	t = ot;
-	t.c_lflag &= ~( ICANON | ISIG | ECHO | ECHOCTL | ECHOE | ECHOKE | ECHONL | ECHOPRT );
-	t.c_iflag |= IGNBRK;
-	tcsetattr(STDIN_FILENO, TCSANOW, &t);
-	ufds[0].fd = master;
-	ufds[0].events = POLLIN;
-	ufds[1].fd = STDIN_FILENO;
-	ufds[1].events = POLLIN;
-
-	while(!done) {
-		int r = poll(ufds, 2, -1);
-		if((r < 0) && (errno != EINTR))	{
-			done =1;
-			break;
-		}
-		if((ufds[0].revents | ufds[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) {
-			done = 1;
-			break;
-		}
-		if(ufds[0].revents & POLLIN) {
-			i = read(master, buf, BUFSIZE);
-			if(i >=1)
-				write(STDOUT_FILENO, buf, i);
-			else
-				done = 1;
-		}
-		if(ufds[1].revents & POLLIN) {
-			i = read(STDIN_FILENO, buf, BUFSIZE);
-			if(i >= 1)
-				write(master, buf, i);
-			else
-				done =1;
-		}
-	}
 }
