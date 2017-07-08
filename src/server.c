@@ -90,11 +90,7 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  /*
-   * main loop: wait for a connection request, echo input line,
-   * then close connection.
-   */
-clientlen = sizeof(clientaddr);
+  clientlen = sizeof(clientaddr);
   /*
    * accept: wait for a connection request
    */
