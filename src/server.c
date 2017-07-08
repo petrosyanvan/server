@@ -25,8 +25,6 @@
 
 #define BUFSIZE 		1024
 
-void pty_scriptfoo(int master);
-
 int main(int argc, char **argv) {
   int parentfd; /* parent socket */
   int childfd; /* child socket */
